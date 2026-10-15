@@ -605,7 +605,11 @@ impl GopCache {
     fn store_output(&self, st: &mut State, out: Vec<crate::video::DecodedFrame>) -> crate::Result<()> {
         count_frames(&out);
         for d in out {
-            self.store(st, d.pts, d.frame, d.draft)?;
+            if let Err(error) = self.store(st, d.pts, d.frame, d.draft) {
+                // Output was consumed; retry must replay from a sync sample, not skip the failed picture.
+                st.next = usize::MAX;
+                return Err(error);
+            }
             st.out_max = st.out_max.max(d.pts);
         }
         Ok(())
@@ -910,6 +914,126 @@ mod tests {
             assert!(state.frames.is_empty());
             assert_eq!(state.bytes, 0);
             assert_eq!(state.out_max, previous_max);
+        }
+    }
+
+    struct AccessFailureSamples {
+        samples: Samples,
+        failing_pts: i64,
+        unreadable: Arc<std::sync::atomic::AtomicBool>,
+        at_flush: bool,
+    }
+
+    struct AccessFailureDecoder {
+        inner: Box<dyn VideoDecoder>,
+        failing_pts: i64,
+        unreadable: Arc<std::sync::atomic::AtomicBool>,
+        at_flush: bool,
+        held: Vec<DecodedFrame>,
+    }
+
+    impl AccessFailureDecoder {
+        fn picture(&self, mut d: DecodedFrame) -> DecodedFrame {
+            use filmcraft_frame::{Chroma, GpuPixels, GpuSurface, PixelData};
+            let surface = Arc::new(UnreadableSurface);
+            let (w, h) = surface.size();
+            let index = (d.pts / 1000) as u8;
+            d.frame = VideoFrame::rgba8(w, h, [index, 0, 0, 255].repeat((w * h) as usize));
+            d.frame.pts = filmcraft_time::Tick(d.pts);
+            if d.pts == self.failing_pts && self.unreadable.load(Ordering::Relaxed) {
+                d.frame.data = PixelData::Gpu(GpuPixels::new(surface, Chroma::C420, u8::BITS));
+            }
+            d
+        }
+    }
+
+    impl VideoDecoder for AccessFailureDecoder {
+        fn decode(&mut self, data: &[u8], pts: i64) -> crate::Result<Vec<DecodedFrame>> {
+            let decoded = self.inner.decode(data, pts)?;
+            let mut out = Vec::new();
+            for d in decoded {
+                if self.at_flush && d.pts == self.failing_pts {
+                    self.held.push(d);
+                } else {
+                    out.push(self.picture(d));
+                }
+            }
+            Ok(out)
+        }
+        fn flush(&mut self) -> Vec<DecodedFrame> {
+            let mut out = self.inner.flush();
+            out.append(&mut self.held);
+            out.into_iter().map(|d| self.picture(d)).collect()
+        }
+        fn reset(&mut self) {
+            self.inner.reset();
+            self.held.clear();
+        }
+        fn name(&self) -> &str {
+            "frame-access failure"
+        }
+    }
+
+    impl VideoSamples for AccessFailureSamples {
+        fn count(&self) -> usize {
+            self.samples.count()
+        }
+        fn pts(&self, i: usize) -> i64 {
+            self.samples.pts(i)
+        }
+        fn sync_before(&self, i: usize) -> usize {
+            self.samples.sync_before(i)
+        }
+        fn sample_at(&self, t: i64) -> Option<usize> {
+            self.samples.sample_at(t)
+        }
+        fn read(&self, i: usize) -> crate::Result<Vec<u8>> {
+            self.samples.read(i)
+        }
+        fn make_decoder(&self) -> crate::Result<Box<dyn VideoDecoder>> {
+            Ok(Box::new(AccessFailureDecoder {
+                inner: self.samples.make_decoder()?,
+                failing_pts: self.failing_pts,
+                unreadable: self.unreadable.clone(),
+                at_flush: self.at_flush,
+                held: Vec::new(),
+            }))
+        }
+    }
+
+    #[test]
+    fn a_repeated_frame_access_failure_never_returns_an_older_picture() {
+        // Predecessor, middle picture and end picture: fail during decode or the final drain.
+        const SAMPLE_COUNT: usize = 3;
+        for at_flush in [false, true] {
+            for rotate in [false, true] {
+                let samples = samples(SAMPLE_COUNT, SAMPLE_COUNT, 0, false);
+                let failing_index = if at_flush { SAMPLE_COUNT - 1 } else { SAMPLE_COUNT / 2 };
+                let failing_pts = samples.pts(failing_index);
+                let s = AccessFailureSamples { samples, failing_pts, unreadable: Arc::new(std::sync::atomic::AtomicBool::new(true)), at_flush };
+                let cache = if rotate {
+                    GopCache::new(None).with_rotation(1)
+                } else {
+                    let (w, h) = filmcraft_frame::GpuSurface::size(&UnreadableSurface);
+                    GopCache::new(None).with_crop(Some(Region { x: 0, y: 0, w: (w / 2) as usize, h: h as usize }))
+                };
+                assert_eq!(index_of(&cache.frame(&s, s.pts(0)).unwrap()), 0);
+                let resets = s.samples.resets.load(Ordering::Relaxed);
+                for attempt in 0..2 {
+                    let result = cache.frame(&s, failing_pts);
+                    assert!(
+                        matches!(&result, Err(CodecError::FrameAccess(why)) if why == "GPU readback failed"),
+                        "flush={at_flush}, rotate={rotate}, attempt={attempt}: {result:?}"
+                    );
+                }
+                assert!(s.samples.resets.load(Ordering::Relaxed) > resets, "retry must replay the consumed picture");
+                s.unreadable.store(false, Ordering::Relaxed);
+                let recovered = cache.frame(&s, failing_pts).unwrap();
+                assert_eq!(index_of(&recovered), failing_index);
+                assert_eq!(recovered.pts, filmcraft_time::Tick(failing_pts));
+                assert_eq!(index_of(&cache.frame(&s, s.pts(SAMPLE_COUNT - 1)).unwrap()), SAMPLE_COUNT - 1);
+                assert_eq!(index_of(&cache.frame(&s, s.pts(0)).unwrap()), 0);
+            }
         }
     }
 
