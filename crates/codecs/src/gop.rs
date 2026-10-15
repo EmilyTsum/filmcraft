@@ -768,9 +768,9 @@ impl GopCache {
             }
         }
         if st.cached(want_pts, draft).is_none() {
-            let out = st.decoder.as_mut().map(|d| timed(|| d.flush())).unwrap_or_default();
-            self.store_output(st, out)?;
+            let out = st.decoder.as_mut().map(|d| timed(|| d.flush())).transpose();
             st.next = usize::MAX;
+            self.store_output(st, out?.unwrap_or_default())?;
         }
         // nearest decoded frame at or before the wanted pts (robust to decoder pts quirks)
         st.at_or_before(want_pts, draft).ok_or_else(|| CodecError::Decode("frame not produced".into()))
@@ -833,9 +833,10 @@ impl GopCache {
         }
         if !found {
             let pics = timed(|| d.flush());
+            *next = usize::MAX;
+            let pics = pics?;
             count_frames(&pics);
             out.extend(pics);
-            *next = usize::MAX;
         }
         Ok(out)
     }
@@ -917,22 +918,24 @@ mod tests {
         }
     }
 
-    struct AccessFailureSamples {
+    struct FailingOutputSamples {
         samples: Samples,
         failing_pts: i64,
         unreadable: Arc<std::sync::atomic::AtomicBool>,
         at_flush: bool,
+        fail_drain: bool,
     }
 
-    struct AccessFailureDecoder {
+    struct FailingOutputDecoder {
         inner: Box<dyn VideoDecoder>,
         failing_pts: i64,
         unreadable: Arc<std::sync::atomic::AtomicBool>,
         at_flush: bool,
+        fail_drain: bool,
         held: Vec<DecodedFrame>,
     }
 
-    impl AccessFailureDecoder {
+    impl FailingOutputDecoder {
         fn picture(&self, mut d: DecodedFrame) -> DecodedFrame {
             use filmcraft_frame::{Chroma, GpuPixels, GpuSurface, PixelData};
             let surface = Arc::new(UnreadableSurface);
@@ -947,7 +950,7 @@ mod tests {
         }
     }
 
-    impl VideoDecoder for AccessFailureDecoder {
+    impl VideoDecoder for FailingOutputDecoder {
         fn decode(&mut self, data: &[u8], pts: i64) -> crate::Result<Vec<DecodedFrame>> {
             let decoded = self.inner.decode(data, pts)?;
             let mut out = Vec::new();
@@ -960,10 +963,13 @@ mod tests {
             }
             Ok(out)
         }
-        fn flush(&mut self) -> Vec<DecodedFrame> {
-            let mut out = self.inner.flush();
+        fn flush(&mut self) -> crate::Result<Vec<DecodedFrame>> {
+            let mut out = self.inner.flush()?;
             out.append(&mut self.held);
-            out.into_iter().map(|d| self.picture(d)).collect()
+            if self.fail_drain && self.unreadable.load(Ordering::Relaxed) {
+                return Err(CodecError::Decode("injected drain failure".into()));
+            }
+            Ok(out.into_iter().map(|d| self.picture(d)).collect())
         }
         fn reset(&mut self) {
             self.inner.reset();
@@ -974,7 +980,7 @@ mod tests {
         }
     }
 
-    impl VideoSamples for AccessFailureSamples {
+    impl VideoSamples for FailingOutputSamples {
         fn count(&self) -> usize {
             self.samples.count()
         }
@@ -991,11 +997,12 @@ mod tests {
             self.samples.read(i)
         }
         fn make_decoder(&self) -> crate::Result<Box<dyn VideoDecoder>> {
-            Ok(Box::new(AccessFailureDecoder {
+            Ok(Box::new(FailingOutputDecoder {
                 inner: self.samples.make_decoder()?,
                 failing_pts: self.failing_pts,
                 unreadable: self.unreadable.clone(),
                 at_flush: self.at_flush,
+                fail_drain: self.fail_drain,
                 held: Vec::new(),
             }))
         }
@@ -1010,7 +1017,8 @@ mod tests {
                 let samples = samples(SAMPLE_COUNT, SAMPLE_COUNT, 0, false);
                 let failing_index = if at_flush { SAMPLE_COUNT - 1 } else { SAMPLE_COUNT / 2 };
                 let failing_pts = samples.pts(failing_index);
-                let s = AccessFailureSamples { samples, failing_pts, unreadable: Arc::new(std::sync::atomic::AtomicBool::new(true)), at_flush };
+                let s =
+                    FailingOutputSamples { samples, failing_pts, unreadable: Arc::new(std::sync::atomic::AtomicBool::new(true)), at_flush, fail_drain: false };
                 let cache = if rotate {
                     GopCache::new(None).with_rotation(1)
                 } else {
@@ -1035,6 +1043,27 @@ mod tests {
                 assert_eq!(index_of(&cache.frame(&s, s.pts(0)).unwrap()), 0);
             }
         }
+    }
+
+    #[test]
+    fn a_repeated_flush_failure_never_returns_an_older_picture() {
+        // Cached predecessor + middle picture + final picture held until drain.
+        const SAMPLE_COUNT: usize = 3;
+        let samples = samples(SAMPLE_COUNT, SAMPLE_COUNT, 0, false);
+        let failing_pts = samples.pts(SAMPLE_COUNT - 1);
+        let s = FailingOutputSamples { samples, failing_pts, unreadable: Arc::new(std::sync::atomic::AtomicBool::new(true)), at_flush: true, fail_drain: true };
+        let cache = GopCache::new(None);
+        assert_eq!(index_of(&cache.frame(&s, s.pts(0)).unwrap()), 0);
+        for _ in 0..2 {
+            assert!(matches!(cache.frame(&s, failing_pts), Err(CodecError::Decode(why)) if why == "injected drain failure"));
+        }
+        {
+            let _nested = DecodingGuard::enter(&cache as *const GopCache as usize);
+            assert!(matches!(cache.frame(&s, failing_pts), Err(CodecError::Decode(why)) if why == "injected drain failure"));
+        }
+        s.unreadable.store(false, Ordering::Relaxed);
+        assert_eq!(index_of(&cache.frame(&s, failing_pts).unwrap()), SAMPLE_COUNT - 1);
+        assert_eq!(index_of(&cache.frame(&s, s.pts(0)).unwrap()), 0);
     }
 
     /// `n` samples, a sync sample every `gop`, pts = 1000 · index (no reordering).
@@ -1077,8 +1106,8 @@ mod tests {
             }
             Ok(out)
         }
-        fn flush(&mut self) -> Vec<DecodedFrame> {
-            self.held.drain(..).map(picture).collect()
+        fn flush(&mut self) -> crate::Result<Vec<DecodedFrame>> {
+            Ok(self.held.drain(..).map(picture).collect())
         }
         fn reset(&mut self) {
             self.resets.fetch_add(1, Ordering::Relaxed);
@@ -1171,7 +1200,7 @@ mod tests {
             std::hint::black_box(rows);
             self.0.decode(sample, pts)
         }
-        fn flush(&mut self) -> Vec<DecodedFrame> {
+        fn flush(&mut self) -> crate::Result<Vec<DecodedFrame>> {
             self.0.flush()
         }
         fn reset(&mut self) {
@@ -1558,8 +1587,8 @@ mod tests {
             px.resize((BIG.0 * BIG.1 * 4) as usize, (pts / 1000) as u8);
             Ok(vec![DecodedFrame { pts, frame: VideoFrame::rgba8(BIG.0, BIG.1, px), draft: false }])
         }
-        fn flush(&mut self) -> Vec<DecodedFrame> {
-            Vec::new()
+        fn flush(&mut self) -> crate::Result<Vec<DecodedFrame>> {
+            Ok(Vec::new())
         }
         fn reset(&mut self) {}
         fn name(&self) -> &str {
@@ -1643,8 +1672,8 @@ mod tests {
             let start = *self.run_start.get_or_insert(pts);
             Ok(if pts < start { Vec::new() } else { vec![picture((pts, false))] })
         }
-        fn flush(&mut self) -> Vec<DecodedFrame> {
-            Vec::new()
+        fn flush(&mut self) -> crate::Result<Vec<DecodedFrame>> {
+            Ok(Vec::new())
         }
         fn reset(&mut self) {
             self.resets.fetch_add(1, Ordering::Relaxed);
@@ -1721,8 +1750,8 @@ mod tests {
             }
             Ok(self.held.drain(..).map(|p| picture((p, false))).collect())
         }
-        fn flush(&mut self) -> Vec<DecodedFrame> {
-            self.held.drain(..).map(|p| picture((p, false))).collect()
+        fn flush(&mut self) -> crate::Result<Vec<DecodedFrame>> {
+            Ok(self.held.drain(..).map(|p| picture((p, false))).collect())
         }
         fn reset(&mut self) {
             self.resets.fetch_add(1, Ordering::Relaxed);
