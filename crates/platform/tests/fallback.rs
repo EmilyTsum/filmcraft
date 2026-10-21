@@ -275,3 +275,19 @@ fn a_sample_software_rejects_during_the_replay_loses_no_pictures() {
     }
     assert_eq!(checked, FIXTURES.len(), "every fixture has a damaged-sample case");
 }
+
+#[test]
+fn required_hardware_drain_failure_never_replays_an_opaque_software_picture() {
+    let ff = filmcraft_testkit::require_ffmpeg!();
+    let path = named(&ff, FIXTURES[0].0).expect("fixture");
+    let stream = read_stream(&path);
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let hw = DrainFailure { inner: filmcraft_codecs::software_video_decoder(&stream.entry).unwrap(), calls: calls.clone() };
+    let info = NalStreamInfo::from_entry(&stream.entry).unwrap().unwrap();
+    let mut decoder = HybridDecoder::new(Box::new(hw), stream.entry.clone(), info);
+    decoder.require_hardware();
+    let error = decoder.flush().err().expect("required hardware drain must fail").to_string();
+    assert!(error.contains("injected hardware drain failure") && error.contains("cannot preserve alpha"), "{error}");
+    assert!(decoder.decode(&stream.samples[0].0, stream.samples[0].1).is_err(), "software replay must remain disabled");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+}

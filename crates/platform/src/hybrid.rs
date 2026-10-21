@@ -29,6 +29,8 @@ pub struct HybridDecoder {
     entry: SampleEntry,
     info: StreamInfo,
     draft: bool,
+    allow_software: bool,
+    count_hardware: bool,
     /// Samples (and pts) since the last restart point; `None` once the bound was passed.
     log: Option<Vec<(Vec<u8>, i64)>>,
     log_bytes: usize,
@@ -43,20 +45,34 @@ pub struct HybridDecoder {
 impl HybridDecoder {
     /// Wrap `hw`, a decoder for `entry` (whose stream is described by `info`).
     pub fn new(hw: Box<dyn VideoDecoder>, entry: SampleEntry, info: impl Into<StreamInfo>) -> Self {
-        let info = info.into();
-        filmcraft_codecs::hw::note_hw_session();
+        Self::with_hardware_confirmation(hw, entry, info.into(), true)
+    }
+
+    /// Native components that omit a hardware-status property keep their fallback behavior,
+    /// but must not inflate hardware counters with an unconfirmed claim (Apple JPEG).
+    pub(crate) fn with_hardware_confirmation(hw: Box<dyn VideoDecoder>, entry: SampleEntry, info: StreamInfo, confirmed: bool) -> Self {
+        if confirmed {
+            filmcraft_codecs::hw::note_hw_session();
+        }
         Self {
             hw: Some(hw),
             sw: None,
             entry,
             info,
             draft: false,
+            allow_software: true,
+            count_hardware: confirmed,
             log: Some(Vec::new()),
             log_bytes: 0,
             last_irap: 0,
             emitted: BTreeSet::new(),
             carry: BTreeMap::new(),
         }
+    }
+
+    /// Require hardware when no software decoder can preserve the stream (HEVC alpha).
+    pub fn require_hardware(&mut self) {
+        self.allow_software = false;
     }
 
     /// Whether the hardware decoder is still in use (false after a fallback).
@@ -130,6 +146,9 @@ impl HybridDecoder {
 
     /// Salvage ready hardware pictures after a decode error, then replay in software.
     fn fall_back(&mut self, err: CodecError) -> Result<Vec<DecodedFrame>> {
+        if !self.allow_software {
+            return Err(CodecError::Decode(format!("{err}; software fallback cannot preserve alpha")));
+        }
         let Some(mut hw) = self.hw.take() else { return Err(err) };
         let drained = match hw.flush() {
             Ok(out) => out,
@@ -143,8 +162,13 @@ impl HybridDecoder {
 
     /// Replay buffered samples; retained hardware pictures cover damaged samples already decoded.
     fn replay(&mut self, hw: Box<dyn VideoDecoder>, err: CodecError, drained: Vec<DecodedFrame>) -> Result<Vec<DecodedFrame>> {
+        if !self.allow_software {
+            return Err(CodecError::Decode(format!("{err}; software fallback cannot preserve alpha")));
+        }
         log::warn!("{} failed ({err}); continuing with the software decoder", hw.name());
-        filmcraft_codecs::hw::note_hw_fallback();
+        if self.count_hardware {
+            filmcraft_codecs::hw::note_hw_fallback();
+        }
         for f in drained {
             if !self.emitted.contains(&f.pts) {
                 self.carry.insert(f.pts, f);
@@ -200,7 +224,9 @@ impl VideoDecoder for HybridDecoder {
         };
         match hw.decode(sample, pts) {
             Ok(out) => {
-                filmcraft_codecs::hw::note_hw_frames(out.len());
+                if self.count_hardware {
+                    filmcraft_codecs::hw::note_hw_frames(out.len());
+                }
                 self.note_emitted(&out);
                 Ok(out)
             }
@@ -213,7 +239,9 @@ impl VideoDecoder for HybridDecoder {
         if let Some(hw) = self.hw.as_mut() {
             match hw.flush() {
                 Ok(frames) => {
-                    filmcraft_codecs::hw::note_hw_frames(frames.len());
+                    if self.count_hardware {
+                        filmcraft_codecs::hw::note_hw_frames(frames.len());
+                    }
                     self.note_emitted(&frames);
                     return Ok(frames);
                 }
@@ -250,6 +278,10 @@ impl VideoDecoder for HybridDecoder {
             (None, Some(sw)) => sw.name(),
             (None, None) => "hardware decoder",
         }
+    }
+
+    fn intra_only(&self) -> bool {
+        matches!(self.info, StreamInfo::Intra)
     }
 
     fn is_random_access(&self, sample: &[u8]) -> Option<bool> {

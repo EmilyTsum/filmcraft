@@ -113,7 +113,7 @@ impl ExportRenderer {
                 }
                 let instance = wgpu::Instance::default();
                 let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
-                let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
+                let (device, queue) = pollster::block_on(adapter.request_device(&crate::device_descriptor(&adapter))).ok()?;
                 // wgpu's default handler panics on a validation or out-of-memory error; log it and
                 // send the remaining frames to the CPU instead.
                 device.on_uncaptured_error(std::sync::Arc::new(|e: wgpu::Error| mark_device_failed(&format!("GPU error: {e}"))));
@@ -127,6 +127,11 @@ impl ExportRenderer {
         }
         let compositor = GpuCompositor::new(&device, &queue);
         Some(Self { _instance: instance, device, queue, compositor })
+    }
+
+    /// Mutable access for source import diagnostics and pixel-parity tests.
+    pub fn compositor_mut(&mut self) -> &mut GpuCompositor {
+        &mut self.compositor
     }
 
     /// One frame as `render_sequence` would return it (premultiplied linear-light RGBA at the
@@ -239,7 +244,7 @@ mod tests {
     /// — the same criterion the golden GPU-vs-CPU parity tests use.
     fn assert_parity(cpu: &Image, gpu: &Image, what: &str) {
         assert_eq!((cpu.w, cpu.h), (gpu.w, gpu.h), "{what}: size mismatch");
-        assert!(cpu.over_black_rgba8().chunks_exact(4).any(|px| px[..3].iter().any(|&v| v != 0)), "{what}: empty reference picture");
+        assert!(cpu.over_black_rgba8().as_chunks::<4>().0.iter().any(|px| px[..3].iter().any(|&v| v != 0)), "{what}: empty reference picture");
         let to8 = |img: &Image| -> Vec<u8> { img.over_black_rgba8() };
         let (a, b) = (to8(cpu), to8(gpu));
         let mut d: Vec<u32> = a

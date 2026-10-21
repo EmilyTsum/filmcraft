@@ -815,3 +815,16 @@ fn caption_sidecars_keep_only_the_exported_interval() {
         assert!(doc.cues.is_empty(), "half-open export excludes cues touching either boundary: {doc:?}");
     }
 }
+
+#[test]
+fn hevc_profiles_round_trip_through_command_settings() {
+    let s = demo();
+    for profile in ["auto", "main", "main10", "main42210"] {
+        let (_, settings) = crate::export_tools::settings_from_params(&s, &json!({"path":"test.mov","hevcProfile":profile}), "file.exportMedia").unwrap();
+        assert_eq!(settings.hevc_profile, profile);
+        let (_, settings) =
+            crate::export_tools::settings_from_params(&s, &json!({"path":"test.mov","settings":{"hevcProfile":profile}}), "file.exportMedia").unwrap();
+        assert_eq!(settings.hevc_profile, profile);
+    }
+    assert!(crate::export_tools::settings_from_params(&s, &json!({"path":"test.mov","hevcProfile":"fake"}), "file.exportMedia").is_err());
+}

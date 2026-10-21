@@ -55,7 +55,7 @@ const ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// Source cache budget: stacked layers + playback lookahead, shared by uploads and imports.
 const SOURCE_CACHE_CAPACITY: usize = 24;
 
-/// The two planes of a hardware decoder's picture as textures on the compositor's device: luma
+/// NV12/P010 (4:2:0) or NV16/P210 (4:2:2) planes on the compositor's device: luma
 /// (`R8Unorm` / `R16Unorm`) and interleaved chroma (`Rg8Unorm` / `Rg16Unorm`), plus whatever keeps
 /// their memory alive.
 pub struct ImportedPlanes {
@@ -73,6 +73,11 @@ static IMPORTER: std::sync::OnceLock<SurfaceImporter> = std::sync::OnceLock::new
 /// OS decoder can share its surfaces). Without one, GPU pictures are read back and uploaded.
 pub fn set_surface_importer(f: SurfaceImporter) {
     let _ = IMPORTER.set(f);
+}
+
+/// Enable normalized 16-bit textures when supported, for P010/P210 direct surface import.
+pub fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static> {
+    wgpu::DeviceDescriptor { required_features: adapter.features() & wgpu::Features::TEXTURE_FORMAT_16BIT_NORM, ..Default::default() }
 }
 
 struct Uploaded {
@@ -640,6 +645,26 @@ impl GpuCompositor {
         let importer = IMPORTER.get().ok_or("no surface importer registered")?;
         let planes = importer(g.surface().as_ref(), &self.device)?;
         let (w, h) = (f.width, f.height);
+        let (sx, sy) = match (g.chroma, g.bits) {
+            (Chroma::C420 | Chroma::C422, 8 | 10) => g.chroma.shifts(),
+            _ => return Err(format!("unsupported GPU surface format: {:?} {}-bit", g.chroma, g.bits)),
+        };
+        let (cw, ch) = (w.div_ceil(1 << sx), h.div_ceil(1 << sy));
+        let (y_format, uv_format) = if g.bits == 8 {
+            (wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Rg8Unorm)
+        } else {
+            (wgpu::TextureFormat::R16Unorm, wgpu::TextureFormat::Rg16Unorm)
+        };
+        if g.surface().size() != (w, h)
+            || planes.luma.size().width != w
+            || planes.luma.size().height != h
+            || planes.chroma.size().width != cw
+            || planes.chroma.size().height != ch
+            || planes.luma.format() != y_format
+            || planes.chroma.format() != uv_format
+        {
+            return Err("imported GPU planes do not match the declared NV12/P010/NV16/P210 format".into());
+        }
         let scale = match g.bits {
             8 => u8::MAX as f32,
             // P010 stores ten significant bits in the high bits of R16Unorm.
@@ -652,7 +677,7 @@ impl GpuCompositor {
             kind: 3,
             code_scale: scale,
             alpha_scale: 0.0,
-            chroma: (w.div_ceil(2), h.div_ceil(2)),
+            chroma: (cw, ch),
             last_used: self.clock,
             _pixels: f.data.clone(),
             _keep: Some(Box::new((planes.luma, planes.chroma, planes.keepalive))),

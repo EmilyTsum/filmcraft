@@ -556,8 +556,12 @@ impl FrameServer {
         self.shared.plans.lock().unwrap_or_else(|e| e.into_inner()).get(k)
     }
 
-    /// A plan failed during GPU presentation; retain the error instead of retrying its pixels.
+    /// Retain terminal presentation errors. A retryable readback leaves the resident plan
+    /// ready so a later UI pass can try the same surface again.
     pub fn reject_plan(&self, key: FrameKey, error: String) {
+        if filmcraft_frame::pending::take() {
+            return;
+        }
         self.shared.plans.lock().unwrap_or_else(|e| e.into_inner()).insert(key, Cached::new(Err(error)));
         self.shared.stats.lock().unwrap_or_else(|e| e.into_inner()).presentation_failed += 1;
     }
@@ -917,6 +921,7 @@ fn run_job(sh: &Shared, job: &Job, pool: &Arc<MediaPool>, services: &Arc<dyn Ser
     // A job whose media bytes were still loading (web) rendered with missing layers: like a
     // cancelled one, its result is not cached (the caller retries it).
     let _ = filmcraft_media::pending::take();
+    let _ = filmcraft_frame::pending::take();
     let mut loading = false;
     let mut failed = false;
     let preview = filmcraft_media::cancel::with_cancel(&job.cancel, || {
@@ -926,7 +931,7 @@ fn run_job(sh: &Shared, job: &Job, pool: &Arc<MediaPool>, services: &Arc<dyn Ser
                     if let Target::SequencePlan(seq) = job.key.target {
                         let result = plan_job(job, seq, pool, services, previews);
                         let pv = result.as_ref().is_ok_and(|(_, pv)| *pv);
-                        loading = filmcraft_media::pending::take();
+                        loading = filmcraft_media::pending::take() | filmcraft_frame::pending::take();
                         if !job.cancel.load(Ordering::Relaxed) && !loading {
                             // Convert texels for upload here, not on the UI thread when the frame is shown.
                             let result = result.map(|(plan, _)| {
@@ -940,7 +945,7 @@ fn run_job(sh: &Shared, job: &Job, pool: &Arc<MediaPool>, services: &Arc<dyn Ser
                     } else {
                         let result = render_job(job, pool, services, previews);
                         let pv = result.as_ref().is_ok_and(|(_, pv)| *pv);
-                        loading = filmcraft_media::pending::take();
+                        loading = filmcraft_media::pending::take() | filmcraft_frame::pending::take();
                         if !job.cancel.load(Ordering::Relaxed) && !loading {
                             failed = result.is_err();
                             sh.done.lock().unwrap_or_else(|e| e.into_inner()).insert(job.key, Cached::new(result.map(|(img, _)| img)));
@@ -1241,6 +1246,10 @@ mod tests {
                         Err(MediaError::Decode("loading".into()))
                     }
                     1 => Err(MediaError::Decode("injected preview failure".into())),
+                    3 => {
+                        filmcraft_frame::pending::mark();
+                        Err(MediaError::Decode("retryable CoreVideo readback".into()))
+                    }
                     _ => Ok(Arc::new(filmcraft_frame::VideoFrame::rgba8(2, 2, vec![255; 2 * 2 * 4]))),
                 }
             }
@@ -1277,6 +1286,10 @@ mod tests {
         assert!(!run(&job), "pending must retry");
         assert!(server.shared.done.lock().unwrap().map.is_empty());
         assert_eq!(server.stats().failed, 0);
+        source.mode.store(3, Ordering::Relaxed);
+        assert!(!run(&job), "retryable surface readback must retry");
+        assert!(server.shared.done.lock().unwrap().map.is_empty());
+        assert_eq!(server.stats().failed, 0);
         source.mode.store(1, Ordering::Relaxed);
         assert!(run(&job), "terminal failure must finish");
         assert!(!server.is_ready(&job.key));
@@ -1300,6 +1313,14 @@ mod tests {
         assert!(source.calls.load(Ordering::Relaxed) >= 3);
         assert!(server.shared.in_flight.lock().unwrap().is_empty());
         let plan_key = FrameKey { target: Target::SequencePlan(seq), ..job.key };
+        let plan = filmcraft_render::plan::FramePlan::Image(filmcraft_render::Image::new(2, 2));
+        server.shared.plans.lock().unwrap().insert(plan_key, Cached::new(Ok(GpuPlan { prepared: filmcraft_gpu::prepare(&plan), plan })));
+        let retained = server.get_plan(&plan_key).unwrap();
+        filmcraft_frame::pending::mark();
+        server.reject_plan(plan_key, "retryable presentation readback".into());
+        assert!(Arc::ptr_eq(&retained, &server.get_plan(&plan_key).unwrap()), "retry must keep the same resident frame");
+        assert!(server.take_error().is_none());
+        assert_eq!(server.stats().presentation_failed, 0);
         server.reject_plan(plan_key, "injected presentation failure".into());
         assert!(!server.is_ready(&plan_key));
         assert!(server.get_plan(&plan_key).is_none());

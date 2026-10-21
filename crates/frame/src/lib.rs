@@ -7,10 +7,11 @@
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
+pub mod pending;
 pub mod pool;
 
 use std::borrow::Cow;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use filmcraft_color::{ColorInfo, DecodeTable, Matrix, Range, linear_to_srgb_u8, normalize_c, normalize_y, srgb_u8_to_linear_table, to_linear, ycbcr_to_rgb};
 use filmcraft_time::Tick;
@@ -43,6 +44,23 @@ impl Chroma {
     }
 }
 
+/// Whether a CPU readback failed permanently or may succeed on a later request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CpuReadbackError {
+    /// Retain the original surface and permit another explicit request.
+    Retryable(String),
+    /// Cache the original cause for all later consumers of this picture.
+    Terminal(String),
+}
+
+impl std::fmt::Display for CpuReadbackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Retryable(message) | Self::Terminal(message) => f.write_str(message),
+        }
+    }
+}
+
 /// GPU-backed decoded picture; CPU consumers use [`GpuPixels::cpu`] for one shared, fallible download.
 pub trait GpuSurface: Send + Sync + std::fmt::Debug {
     /// Picture size in luma samples.
@@ -51,6 +69,10 @@ pub trait GpuSurface: Send + Sync + std::fmt::Debug {
     fn byte_len(&self) -> usize;
     /// The picture in planar CPU form (`PixelData::Yuv8` / `Yuv16`).
     fn download(&self) -> Result<PixelData, String>;
+    /// Classified readback. Existing adapters retain their terminal-error behavior by default.
+    fn download_classified(&self) -> Result<PixelData, CpuReadbackError> {
+        self.download().map_err(CpuReadbackError::Terminal)
+    }
     /// The concrete surface, for the GPU compositor to import.
     fn as_any(&self) -> &dyn std::any::Any;
     /// Process-unique id of the surface (upload cache key).
@@ -66,6 +88,7 @@ pub struct GpuPixels {
     /// Significant bits per sample (8 = NV12-like, 10 = P010-like).
     pub bits: u32,
     cpu: Arc<OnceLock<Result<PixelData, String>>>,
+    download_lock: Arc<Mutex<()>>,
 }
 
 impl std::fmt::Debug for GpuPixels {
@@ -76,25 +99,32 @@ impl std::fmt::Debug for GpuPixels {
 
 impl GpuPixels {
     pub fn new(surface: Arc<dyn GpuSurface>, chroma: Chroma, bits: u32) -> Self {
-        Self { surface, chroma, bits, cpu: Arc::new(OnceLock::new()) }
+        Self { surface, chroma, bits, cpu: Arc::new(OnceLock::new()), download_lock: Arc::new(Mutex::new(())) }
     }
 
     pub fn surface(&self) -> &Arc<dyn GpuSurface> {
         &self.surface
     }
 
-    /// Download once; clones share successful pixels or a terminal error.
+    /// Share successful pixels or terminal errors; retryable failures remain errors without
+    /// entering the cache. Concurrent callers serialize readback and recheck the shared result.
     pub fn cpu(&self) -> Result<&PixelData, String> {
-        self.cpu
-            .get_or_init(|| {
-                let data = self.surface.download()?;
-                if matches!(data, PixelData::Gpu(_)) {
-                    return Err("GPU download returned another GPU surface".into());
-                }
-                Ok(data)
-            })
-            .as_ref()
-            .map_err(Clone::clone)
+        if self.cpu.get().is_none() {
+            let _guard = self.download_lock.lock().unwrap_or_else(PoisonError::into_inner);
+            if self.cpu.get().is_none() {
+                let result = match self.surface.download_classified() {
+                    Ok(PixelData::Gpu(_)) => Err("GPU download returned another GPU surface".into()),
+                    Ok(pixels) => Ok(pixels),
+                    Err(CpuReadbackError::Terminal(error)) => Err(error),
+                    Err(CpuReadbackError::Retryable(error)) => {
+                        pending::mark();
+                        return Err(error);
+                    }
+                };
+                let _ = self.cpu.set(result);
+            }
+        }
+        self.cpu.get().ok_or_else(|| "CPU readback completed without a result".to_string())?.as_ref().map_err(Clone::clone)
     }
 }
 
@@ -1039,6 +1069,67 @@ mod tests {
         assert_eq!(surface.downloads.load(std::sync::atomic::Ordering::Relaxed), 1);
         let cpu = frame.cpu().unwrap().into_owned();
         assert!(matches!(cpu.cpu().unwrap(), Cow::Borrowed(_)));
+    }
+
+    #[derive(Debug)]
+    struct FailingSurface {
+        attempts: std::sync::atomic::AtomicUsize,
+        retryable: bool,
+    }
+    impl GpuSurface for FailingSurface {
+        fn size(&self) -> (u32, u32) {
+            (1, 1)
+        }
+        fn byte_len(&self) -> usize {
+            4
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn id(&self) -> u64 {
+            42
+        }
+        fn download(&self) -> Result<PixelData, String> {
+            self.download_classified().map_err(|error| error.to_string())
+        }
+        fn download_classified(&self) -> Result<PixelData, CpuReadbackError> {
+            let attempt = self.attempts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if !self.retryable {
+                Err(CpuReadbackError::Terminal("original native cause -666".into()))
+            } else if attempt == 0 {
+                Err(CpuReadbackError::Retryable("temporary native cause -666".into()))
+            } else {
+                Ok(PixelData::Rgba8(Arc::new(vec![1, 2, 3, 255])))
+            }
+        }
+    }
+
+    #[test]
+    fn classified_failures_cache_terminal_causes_but_allow_retry_across_clones() {
+        for retryable in [false, true] {
+            let surface = Arc::new(FailingSurface { attempts: Default::default(), retryable });
+            let pixels = GpuPixels::new(surface.clone(), Chroma::C420, 8);
+            let _ = pending::take();
+            let error = pixels.cpu().unwrap_err();
+            assert_eq!(error, if retryable { "temporary native cause -666" } else { "original native cause -666" });
+            assert_eq!(pending::take(), retryable);
+            std::thread::scope(|scope| {
+                for _ in 0..4 {
+                    let pixels = pixels.clone();
+                    scope.spawn(move || {
+                        let _ = pending::take();
+                        if retryable {
+                            let PixelData::Rgba8(data) = pixels.cpu().unwrap() else { panic!("wrong pixels") };
+                            assert_eq!(data.as_slice(), &[1, 2, 3, 255]);
+                        } else {
+                            assert_eq!(pixels.cpu().unwrap_err(), "original native cause -666");
+                        }
+                        assert!(!pending::take());
+                    });
+                }
+            });
+            assert_eq!(surface.attempts.load(std::sync::atomic::Ordering::Relaxed), if retryable { 2 } else { 1 });
+        }
     }
 
     #[test]
