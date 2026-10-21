@@ -22,6 +22,11 @@ let availability = filmcraft_platform::register(); // Available("VideoToolbox") 
   reorder buffer of the stream's own depth (`max_num_reorder_frames` /
   `sps_max_num_reorder_pics`) restores presentation order; a run starting at an HEVC CRA leaves
   out its RASL pictures, as our decoder does. Each seek (`reset`) starts a fresh session.
+  - Surface eviction releases the original buffer only after a successful CPU copy. A failed
+    eviction preserves the buffer and its retention entry and reports a decoder error for
+    software replay; direct CPU reads log failures and remain retryable. The infallible shared
+    frame conversions still need the fallible-access integration described in
+    [macOS surface limits](../../docs/macos-videotoolbox.md#export-settings).
 - **Windows: Media Foundation + Direct3D 11 / DXVA, H.264 (`avcC`), HEVC (`hvcC`), VP9 (`vpcC`) and
   AV1 (`av1C`)**, 8-bit 4:2:0 (H.264 Baseline / Main / High, HEVC Main, VP9 profile 0, AV1 main) and
   10-bit 4:2:0 (HEVC Main 10, VP9 profile 2, AV1 main 10)

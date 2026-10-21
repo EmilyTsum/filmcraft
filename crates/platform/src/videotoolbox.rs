@@ -115,14 +115,39 @@ impl std::fmt::Debug for VtSurface {
 
 impl VtSurface {
     /// Materialise the CPU planes (if not already done) and release the `CVImageBuffer` back to
-    /// VideoToolbox's pool.
-    fn evict_to_cpu(&self) {
+    /// VideoToolbox's pool. A failed copy keeps the original buffer available for another read.
+    fn evict_to_cpu(&self) -> std::result::Result<(), String> {
         if self.layout.bits <= 8 {
-            let _ = self.planes_u8();
+            self.read_planes_u8()?;
         } else {
-            let _ = self.planes_u16();
+            self.read_planes_u16()?;
         }
         *self.pb.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        Ok(())
+    }
+
+    fn read_planes_u8(&self) -> std::result::Result<[Arc<Vec<u8>>; 2], String> {
+        let mut cache = self.u8_planes.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(planes) = cache.as_ref() {
+            return Ok(planes.clone());
+        }
+        let pb_guard = self.pb.lock().unwrap_or_else(PoisonError::into_inner);
+        let pb = pb_guard.as_ref().ok_or("decoded picture has no backing buffer or CPU planes")?;
+        let planes = copy_biplanar_u8(pb, &self.layout, self.ox, self.oy, self.w, self.h)?;
+        *cache = Some(planes.clone());
+        Ok(planes)
+    }
+
+    fn read_planes_u16(&self) -> std::result::Result<[Arc<Vec<u16>>; 2], String> {
+        let mut cache = self.u16_planes.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(planes) = cache.as_ref() {
+            return Ok(planes.clone());
+        }
+        let pb_guard = self.pb.lock().unwrap_or_else(PoisonError::into_inner);
+        let pb = pb_guard.as_ref().ok_or("decoded picture has no backing buffer or CPU planes")?;
+        let planes = copy_biplanar_u16(pb, &self.layout, self.ox, self.oy, self.w, self.h)?;
+        *cache = Some(planes.clone());
+        Ok(planes)
     }
 }
 
@@ -131,30 +156,14 @@ impl NativeSurface for VtSurface {
         if self.layout.bits > 8 {
             return None;
         }
-        let mut cache = self.u8_planes.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(planes) = cache.as_ref() {
-            return Some(planes.clone());
-        }
-        let pb_guard = self.pb.lock().unwrap_or_else(PoisonError::into_inner);
-        let pb = pb_guard.as_ref()?;
-        let planes = copy_biplanar_u8(pb, &self.layout, self.ox, self.oy, self.w, self.h).ok()?;
-        *cache = Some(planes.clone());
-        Some(planes)
+        self.read_planes_u8().inspect_err(|e| log::error!("VideoToolbox {}x{} 8-bit CPU plane readback failed: {e}", self.w, self.h)).ok()
     }
 
     fn planes_u16(&self) -> Option<[Arc<Vec<u16>>; 2]> {
         if self.layout.bits <= 8 {
             return None;
         }
-        let mut cache = self.u16_planes.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(planes) = cache.as_ref() {
-            return Some(planes.clone());
-        }
-        let pb_guard = self.pb.lock().unwrap_or_else(PoisonError::into_inner);
-        let pb = pb_guard.as_ref()?;
-        let planes = copy_biplanar_u16(pb, &self.layout, self.ox, self.oy, self.w, self.h).ok()?;
-        *cache = Some(planes.clone());
-        Some(planes)
+        self.read_planes_u16().inspect_err(|e| log::error!("VideoToolbox {}x{} {}-bit CPU plane readback failed: {e}", self.w, self.h, self.layout.bits)).ok()
     }
 
     fn take_planes_u8(&self) -> Option<[Arc<Vec<u8>>; 2]> {
@@ -298,15 +307,17 @@ impl Shared {
         self.out.lock().unwrap_or_else(PoisonError::into_inner).push(o);
     }
 
-    fn track_surface(&self, surface: &Arc<VtSurface>) {
+    fn track_surface(&self, surface: &Arc<VtSurface>) -> std::result::Result<(), String> {
         let mut q = self.surfaces.lock().unwrap_or_else(PoisonError::into_inner);
         q.retain(|w| w.strong_count() > 0);
         while q.len() >= MAX_RETAINED_SURFACES {
-            if let Some(old) = q.pop_front().and_then(|w| w.upgrade()) {
-                old.evict_to_cpu();
+            if let Some(old) = q.front().and_then(|w| w.upgrade()) {
+                old.evict_to_cpu().map_err(|e| format!("cannot evict retained VideoToolbox surface: {e}"))?;
             }
+            q.pop_front();
         }
         q.push_back(Arc::downgrade(surface));
+        Ok(())
     }
 }
 
@@ -519,7 +530,7 @@ fn copy_out(pb: &CVImageBuffer, l: &Layout, shared: &Shared) -> std::result::Res
         u8_planes: Mutex::new(None),
         u16_planes: Mutex::new(None),
     });
-    shared.track_surface(&surface);
+    shared.track_surface(&surface)?;
     let surface_dyn: Arc<dyn NativeSurface> = surface;
     let data = if l.bits <= 8 {
         PixelData::Biplanar8 { planes: None, chroma: l.chroma, surface: Some(surface_dyn) }
@@ -1267,3 +1278,7 @@ fn premultiplied_alpha(pb: &CVImageBuffer) -> bool {
     let premultiplied = unsafe { objc2_core_video::kCVImageBufferAlphaChannelMode_PremultipliedAlpha };
     value.as_ref().and_then(|v| v.downcast_ref::<CFString>()).is_some_and(|v| v == premultiplied)
 }
+
+#[cfg(test)]
+#[path = "videotoolbox_surface_tests.rs"]
+mod surface_tests;

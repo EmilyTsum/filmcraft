@@ -59,6 +59,19 @@ Decoded biplanar frames retain their CoreVideo surface for direct Metal texture 
 materialise their planes on demand. Retention is bounded, and GPU or format incompatibility uses
 the CPU upload path. Packed alpha formats continue through CPU conversion.
 
+Eviction releases a CoreVideo buffer only after its CPU planes have been copied successfully.
+A failed copy keeps the original buffer and its tracking entry, and rejects the new decoded
+picture through the existing decoder-error/software-replay path rather than exceeding the
+retention limit. Direct CPU plane requests log their readback error and leave the buffer available
+for another request. Synthetic CoreVideo tests cover repeated failures and recovery for NV12 and
+P010, and successful eviction with the eight-surface limit.
+
+The current shared frame conversion API is still infallible: a failed direct CPU materialisation
+can still return blank pixels after logging. This local retention fix does not resolve that API
+limitation. The fallible CPU-access boundary in [#1019](https://github.com/storytold/filmcraft/pull/1019)
+and shared surface/import contract in [#1021](https://github.com/storytold/filmcraft/pull/1021) need
+to be coordinated with this macOS adapter before the implementations land together.
+
 10-bit input uses P010/P210, with significant bits shifted into 16-bit CoreVideo storage. ProRes
 4444 uses packed little-endian AYUV16, preserving alpha separately from video-range YUV. The current
 export pipeline converts YUV to 10-bit values (including ProRes 4444); its 12-bit decoded output
