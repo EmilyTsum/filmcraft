@@ -479,10 +479,14 @@ impl VideoDecoder for HevcDecoder {
 
 pub fn hevc_factory(e: &SampleEntry) -> Option<Result<Box<dyn VideoDecoder>>> {
     match &e.codec {
-        CodecConfig::Hevc(c) if crate::hw::hevc_has_alpha(c) => {
-            Some(Err(CodecError::Unsupported("HEVC alpha requires a compatible VideoToolbox hardware decoder".into())))
+        CodecConfig::Hevc(c) => {
+            // Registering a hardware decoder never makes a file undecodable (ADR 0001): without a
+            // VideoToolbox session the alpha layer is dropped and the picture shows opaque.
+            if crate::hw::hevc_has_alpha(c) {
+                log::warn!("HEVC alpha: the software decoder shows this stream opaque");
+            }
+            Some(HevcDecoder::new(c.to_bytes()).map(|d| Box::new(d) as Box<dyn VideoDecoder>))
         }
-        CodecConfig::Hevc(c) => Some(HevcDecoder::new(c.to_bytes()).map(|d| Box::new(d) as Box<dyn VideoDecoder>)),
         _ => None,
     }
 }

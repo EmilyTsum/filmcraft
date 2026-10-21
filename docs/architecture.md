@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** trivial (status line, revision history and roadmap link added; content checked against the crate list) · **Target:** Adobe Premiere Pro 2026 (26.5.2)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-21 · **Change:** trivial (macOS VideoToolbox surfaces and limits linked) · **Target:** Adobe Premiere Pro 2026 (26.5.2)
 
 FilmCraft is a Cargo workspace of small crates with strictly enforced layering. The engine is
 headless: every feature can be reached without a window, and the egui UI is one client among the
@@ -771,6 +771,5 @@ native menus) in `apps/filmcraft`. [roadmap.md](roadmap.md) has the milestone st
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | trivial | macOS VideoToolbox: decoded CoreVideo surfaces imported into Metal; profile selection, HDR / alpha storage, runtime validation and fallback limits in [macos-videotoolbox.md](macos-videotoolbox.md) |
 | 2026-10-10 | trivial | Status line and revision history added (craftrules progress-docs standard); milestone link points at docs/roadmap.md |
-
-macOS VideoToolbox profile selection, HDR/alpha storage, runtime validation and fallback limits are documented in [macos-videotoolbox.md](macos-videotoolbox.md).

@@ -108,8 +108,8 @@ platforms** G4, G9, G17; **performance** G16; **ecosystem** G11; **measurement**
   (Windows); GPU compositing, blend modes, 34 effect ids incl. Lumetri basic / creative / vignette,
   GPU export rendering (#421). macOS ProRes/VP9/AV1/JPEG decode and expanded HDR/alpha export are
   described in [macos-videotoolbox.md](macos-videotoolbox.md).
-- **Missing:** zero-copy decoded frames into wgpu (every frame is read back to the CPU and
-  re-uploaded); VideoToolbox B-frames; Intel Quick Sync and AMD AMF encoders (and their 4:2:2 decode);
+- **Missing:** zero-copy decoded frames into wgpu on Windows and Linux (every frame is read back
+  to the CPU and re-uploaded; on macOS only packed BGRA and y416 pictures still are); VideoToolbox B-frames; Intel Quick Sync and AMD AMF encoders (and their 4:2:2 decode);
   VA-API VP9 / AV1 and VA-API encode; HEVC encode on Linux; AV1 hardware encode; ~48 of Premiere's
   ~82 accelerated effects (keys, masks, Lumetri curves / wheels / HSL, distortions, transitions);
   external video I/O (DeckLink / AJA, Mercury Transmit), control surfaces (EUCON / Mackie);

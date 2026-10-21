@@ -190,7 +190,7 @@ No FFmpeg inside. The video codecs, AAC, Opus and the containers are our own Rus
 | **AVI** | ✓ | | AVI 1.0 and OpenDML (files past 1 GB); Motion JPEG, H.264, HEVC and uncompressed RGB / YUV with PCM, MP3, MP2 or AC-3. DivX / Xvid and DV not yet |
 | **Stills** | ✓ | ✓ | Import PNG, JPEG, GIF, WebP, TIFF and BMP (animated GIF and APNG as clips, with transparency); export PNG sequences and animated GIF |
 
-Also imported: MPEG-2 / MPEG-1 video, AC-3, MP2, MXF (OP1a / OP-Atom), MPEG transport and program streams (AVCHD, broadcast, DVD), Ogg and image sequences. Not yet: AV1 export, camera RAW, E-AC-3. Hardware decoding works on macOS (VideoToolbox), Windows (Media Foundation) and, for H.264 and HEVC, Linux (VA-API); H.264 export can use NVIDIA's encoder on Windows and Linux (opt-in), and H.265 export works through it (NVENC on Windows, VideoToolbox Main / Main 10 / Main 4:2:2 10 on macOS) ([#30](https://github.com/storytold/filmcraft/issues/30)).
+Also imported: MPEG-2 / MPEG-1 video, AC-3, MP2, MXF (OP1a / OP-Atom), MPEG transport and program streams (AVCHD, broadcast, DVD), Ogg and image sequences. Not yet: AV1 export, camera RAW, E-AC-3. Hardware decoding works on macOS (VideoToolbox), Windows (Media Foundation) and, for H.264 and HEVC, Linux (VA-API); H.264 export can use NVIDIA's encoder on Windows and Linux (opt-in), and H.265 export works through it (NVENC on Windows, VideoToolbox Main / Main 10 / Main 4:2:2 10 on macOS) ([#30](https://github.com/storytold/filmcraft/issues/30)). On macOS, VideoToolbox also decodes ProRes, VP9 and AV1 where the Mac supports them, and can encode ProRes (all six profiles) and Motion JPEG (opt-in); see [VideoToolbox format details](docs/macos-videotoolbox.md) for alpha, precision and device limits.
 
 <br>
 
@@ -203,7 +203,7 @@ Also imported: MPEG-2 / MPEG-1 video, AC-3, MP2, MXF (OP1a / OP-Atom), MPEG tran
 <p align="center"><sub>Export mode, set to write the trailer as H.264 MP4.</sub></p>
 
 - **H.264 MP4 with AAC, using our own encoders.** A 6-second 960×540 render takes 1.3 seconds and decodes in ffmpeg without a single warning, with strict error detection on.
-- **Also:** Apple ProRes 422 HQ and Motion JPEG in QuickTime, MXF OP1a and standard OP-Atom (DNxHR, ProRes or H.264 with PCM and start timecode), PNG sequences, animated GIF and WAV.
+- **Also:** Apple ProRes (Proxy, LT, 422, HQ, 4444, 4444 XQ) and Motion JPEG in QuickTime, hardware-encoded on macOS with Hardware encoding on; MXF OP1a and standard OP-Atom (DNxHR, ProRes or H.264 with PCM and start timecode), PNG sequences, animated GIF and WAV.
 - **Background jobs** with progress and cancel, so you keep editing while it renders.
 - **Render previews:** the render bar marks segments green, yellow or red; rendered previews are cached by content, so an edit only invalidates what it touches and undo brings the green back.
 
@@ -475,7 +475,3 @@ Forks and modified versions must remove them.
 ## Star history
 
 [![Star History Chart](https://api.star-history.com/svg?repos=storytold/filmcraft&type=Date&legend=top-left)](https://www.star-history.com/?repos=storytold%2Ffilmcraft&type=date&legend=top-left)
-
-macOS also supports opt-in ProRes (six profiles) and Motion JPEG hardware export, and hardware
-ProRes, VP9 and AV1 decoding where supported. See [VideoToolbox format details](docs/macos-videotoolbox.md)
-for alpha, precision, device-dependent limits and validation.

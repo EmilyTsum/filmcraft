@@ -340,9 +340,8 @@ Details in [docs/performance.md](../../docs/performance.md).
 
 ## Not yet
 
-Zero-copy upload of decoded pictures into wgpu textures (`CVPixelBuffer`s on macOS, Direct3D 11
-textures on Windows); B-frames in the VideoToolbox encoders in
-VideoToolbox; VP9 and AV1 through VA-API (Linux), and VA-API encoding; field-coded H.264; 4:4:4 and 4:2:2 encoding with NVENC, HDR
+Zero-copy upload of decoded pictures into wgpu textures on Windows (Direct3D 11 textures) and
+Linux, and on macOS for packed BGRA and y416 pictures; B-frames in the VideoToolbox encoders; VP9 and AV1 through VA-API (Linux), and VA-API encoding; field-coded H.264; 4:4:4 and 4:2:2 encoding with NVENC, HDR
 H.264 with NVENC (HDR H.264 stays with the software encoder), HDR10 MaxCLL / MaxFALL measured from
 the pictures (they are written as 0, unknown), AV1 with NVENC, H.265 with the other Windows vendors and on Linux, and encoders
 from other vendors on Windows (through Media Foundation); VP9 / AV1 4:4:4 and 12-bit on Windows.

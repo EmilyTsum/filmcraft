@@ -4,7 +4,10 @@ The macOS backend uses hardware-required VideoToolbox sessions. A codec name or 
 is not sufficient: session creation checks the actual profile, dimensions and output layout.
 Ordinary unsupported streams keep the software decoder. A failed hardware decoder replays from
 the latest random access sample in software; ProRes and JPEG restart on every sample.
-HEVC alpha has no equivalent software decoder and reports an error rather than discarding alpha.
+HEVC alpha has no equivalent software decoder. Without a VideoToolbox session (other platforms,
+hardware decoding Off, Main 10 alpha) it opens in software showing its opaque base layer, with a
+logged warning; a running hardware alpha session that fails mid-stream reports an error rather
+than silently turning opaque.
 
 ## Formats
 
@@ -31,8 +34,8 @@ are declined by these paths; they are never silently converted to 8-bit or 4:2:0
 On the tested Apple M5/macOS system, the OS can create an encoder for HEVC Main 10 with alpha but
 refuses the corresponding decoder even without output-pixel-format restrictions. This combination
 is rejected explicitly in the export adapter and low-level encoder; use ProRes 4444/XQ for HDR
-with alpha. No 8-bit substitution is made. Hardware decode Off also refuses HEVC alpha instead of
-opening only its opaque base layer.
+with alpha. No 8-bit substitution is made. With hardware decoding Off, HEVC alpha opens opaque in
+software.
 
 JPEG needs special care: Apple's default JPEG component ignores the hardware-required flag and
 selects software. We enumerate a component marked `IsHardwareAccelerated`, select its exact

@@ -96,7 +96,14 @@ fn profile_round_trips() {
                 hybrid.require_hardware();
                 let error = hybrid.decode(&packets[0].data, 0).err().expect("hardware failure");
                 assert!(error.to_string().contains("cannot preserve alpha"));
-                assert!(filmcraft_codecs::software_video_decoder(&entry).is_err());
+                // Without a hardware session the file still opens (ADR 0001), showing opaque.
+                let mut sw = filmcraft_codecs::software_video_decoder(&entry).expect("HEVC alpha opens in software");
+                let mut opaque = vec![];
+                for (i, p) in packets.iter().enumerate() {
+                    opaque.extend(sw.decode(&p.data, i as i64).unwrap());
+                }
+                opaque.extend(sw.flush());
+                assert_eq!(opaque.len(), 6, "{profile}: software frames");
             }
             let Some(decoder) = filmcraft_platform::videotoolbox_factory(&entry) else {
                 panic!("no decoder: {entry:?}");

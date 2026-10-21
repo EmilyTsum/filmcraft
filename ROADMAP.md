@@ -5,7 +5,7 @@
 
 **Stage: alpha** · next: beta, ~19 points of ready-for-real-work and ~400–700 h away, plus opening Premiere's `.prproj` ([why](docs/target-app-parity.md#stage); passes the [core-workflow gate](docs/roadmap.md#alpha-gate))
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (language table: German covers the whole interface) · **Target:** Adobe Premiere Pro 2026 (26.5.2)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-21 · **Change:** minor (macOS VideoToolbox codecs and M5 validation) · **Target:** Adobe Premiere Pro 2026 (26.5.2)
 
 Progress toward parity with Adobe Premiere Pro. This page is the summary; the detail is in
 [docs/target-app-parity.md](docs/target-app-parity.md) (assessment, methodology, calibration),
@@ -107,6 +107,7 @@ Ranked; detail and "done when" in [docs/roadmap.md](docs/roadmap.md) and [docs/g
 
 ## Progress log
 
+- **2026-10-21:** macOS VideoToolbox codecs (#30): hardware decode of all six ProRes profiles, Motion JPEG, VP9 profile 0 / 2 and AV1 main; HEVC Main 10 / Main 4:2:2 10 and alpha preserved; opt-in hardware ProRes and Motion JPEG export and explicit HEVC profiles (`hevcProfile`) in SDR / PQ / HLG; decoded CoreVideo surfaces imported directly into Metal. Details and limits: [VideoToolbox formats](docs/macos-videotoolbox.md)
 - **2026-10-12:** Transform's motion-blur shutter on adjustment layers uses the sequence frame rate instead of 24 fps, so a 360° shutter in a 60 fps sequence spans one frame, not 2.5 (#1088)
 - **2026-10-10 (changed media):** Settings ▸ Media ▸ Automatically refresh growing files works: media files that change on disk while the project is open (a recording still being written, a render written over the file a clip uses) are read again every *Refresh growing files every* seconds and as soon as the window comes back to the front: the new length, picture and identity, without an undo step (`media.refreshChanged`, `media_watch`).
 - **2026-10-10 (re-measure):** full parity re-measure against Premiere Pro 26.5.2: menu label diff 338 / 366 (92%), installed bundle listings (10 UI languages, exporter and codec frameworks), 188 open issues. Breadth ~86% (file formats now counted), ready ~55%, stage **alpha**; progress docs reorganized per the craftrules standard ([target-app-parity](docs/target-app-parity.md), [gaps](docs/gaps.md), [roadmap](docs/roadmap.md), [codec](docs/codec-parity.md), [file-format](docs/file-format-parity.md), [hardware](docs/hardware-parity.md), [UI](docs/ui-parity.md), [localization](docs/localization-parity.md)).
@@ -166,6 +167,7 @@ Ranked; detail and "done when" in [docs/roadmap.md](docs/roadmap.md) and [docs/g
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | macOS VideoToolbox: hardware ProRes / Motion JPEG export, ProRes / VP9 / AV1 / JPEG decode, HEVC Main 10 / Main 4:2:2 10 and alpha, M5 validation ([VideoToolbox formats](docs/macos-videotoolbox.md)); remaining hardware estimates not recalibrated |
 | 2026-10-13 | minor | Language table: German covers the whole interface (~100%) |
 | 2026-10-12 | trivial | Progress log: Transform shutter on adjustment layers (#1088) |
 | 2026-10-11 | minor | Language table: German ships the menus (#630, 10.6%) |
@@ -175,5 +177,3 @@ Ranked; detail and "done when" in [docs/roadmap.md](docs/roadmap.md) and [docs/g
 | 2026-10-10 | major | Restructured to the craftrules progress-docs shape: stage banner, headline numbers, dimension / feature / language tables, upcoming; re-measured against Premiere 26.5.2 (breadth ~87 → ~86%, ready ~50–60% → ~55%); honest assessment and scorecard moved to docs/target-app-parity.md, "Where we are lacking" to docs/gaps.md, milestones to docs/roadmap.md, interface localization to docs/localization-parity.md |
 | 2026-10-08 | minor | Log entries for HEVC export, Source playback and range dragging |
 | 2026-10-05 | major | Honest assessment added: checklist ~87% vs ready for real work ~50–60% |
-
-Expanded macOS codec hardware support and M5 validation: [VideoToolbox formats](docs/macos-videotoolbox.md). Remaining hardware estimates above have not been recalibrated.
