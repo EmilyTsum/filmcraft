@@ -101,7 +101,7 @@ Ranked; detail and "done when" in [docs/roadmap.md](docs/roadmap.md) and [docs/g
 3. **10-bit / 4:2:2 camera media without hardware** (H.264 High 10 / 4:2:2, HEVC 4:2:2; #626). 30–50 h.
 4. **Measure fidelity against Premiere** and add `cargo xtask parity`. 50–90 h.
 5. **Real-world media corpus and workflow acceptance tests.** 40–70 h.
-6. **Hardware acceleration, continued** (#30): zero-copy upload, more effects on the GPU, Quick Sync / AMD encoders, VideoToolbox Main 10. 120–200 h.
+6. **Hardware acceleration, continued** (#30): zero-copy upload, more effects on the GPU, Quick Sync / AMD encoders. 120–200 h.
 7. **UI fidelity:** Program monitor transform handles, Effect Controls, docking. 120–200 h.
 8. **Plugin hosting** (VST3 / AU, then OpenFX). Owner decision needed. 200–400 h.
 
@@ -175,3 +175,5 @@ Ranked; detail and "done when" in [docs/roadmap.md](docs/roadmap.md) and [docs/g
 | 2026-10-10 | major | Restructured to the craftrules progress-docs shape: stage banner, headline numbers, dimension / feature / language tables, upcoming; re-measured against Premiere 26.5.2 (breadth ~87 → ~86%, ready ~50–60% → ~55%); honest assessment and scorecard moved to docs/target-app-parity.md, "Where we are lacking" to docs/gaps.md, milestones to docs/roadmap.md, interface localization to docs/localization-parity.md |
 | 2026-10-08 | minor | Log entries for HEVC export, Source playback and range dragging |
 | 2026-10-05 | major | Honest assessment added: checklist ~87% vs ready for real work ~50–60% |
+
+Expanded macOS codec hardware support and M5 validation: [VideoToolbox formats](docs/macos-videotoolbox.md). Remaining hardware estimates above have not been recalibrated.

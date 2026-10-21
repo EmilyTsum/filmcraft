@@ -138,6 +138,26 @@ pub fn recycle(frame: Arc<VideoFrame>) {
         PixelData::RgbaF32(_) => {}
         PixelData::Yuv8 { planes, alpha, .. } => planes.into_iter().chain(alpha).for_each(|p| give(&U8, p)),
         PixelData::Yuv16 { planes, alpha, .. } => planes.into_iter().chain(alpha).for_each(|p| give(&U16, p)),
+        PixelData::Biplanar8 { planes, surface, .. } => {
+            if let Some(planes) = planes {
+                planes.into_iter().for_each(|p| give(&U8, p));
+            }
+            if let Some(s) = surface.filter(|s| Arc::strong_count(s) == 1)
+                && let Some(planes) = s.take_planes_u8()
+            {
+                planes.into_iter().for_each(|p| give(&U8, p));
+            }
+        }
+        PixelData::Biplanar16 { planes, surface, .. } => {
+            if let Some(planes) = planes {
+                planes.into_iter().for_each(|p| give(&U16, p));
+            }
+            if let Some(s) = surface.filter(|s| Arc::strong_count(s) == 1)
+                && let Some(planes) = s.take_planes_u16()
+            {
+                planes.into_iter().for_each(|p| give(&U16, p));
+            }
+        }
     }
 }
 

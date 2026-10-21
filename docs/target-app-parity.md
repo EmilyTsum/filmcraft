@@ -308,7 +308,7 @@ Distance to beta: ~19 points of ready-for-real-work plus `.prproj` import, ~400�
 | H.264 High 10 / 4:2:2 and HEVC 4:2:2 software decoding (camera media) | 30–50 |
 | Real-world media corpus and scripted workflow acceptance tests | 40–70 |
 | UI fidelity top issues (Program monitor handles, Effect Controls, docking, deselect) | 60–100 |
-| Hardware: zero-copy, VideoToolbox Main 10, Quick Sync / AMF encode, more GPU effects | 60–100 |
+| Hardware: zero-copy, Quick Sync / AMF encode, more GPU effects | 60–100 |
 | Windows / Linux runtime fixes, audio device issues | 30–60 |
 | Container gaps users hit: E-AC-3, AVI, multi-track audio, still formats | 30–50 |
 | Interchange validation (AAF / OMF in Avid and Pro Tools, XML speed) | 20–40 |
@@ -360,3 +360,5 @@ control surfaces), and validation in Avid Media Composer / Pro Tools.
 | 2026-10-10 | major | Created from ROADMAP.md's scorecard and estimate; full re-measure against Premiere Pro 26.5.2 (menu label diff, installed-bundle listings, 188 open issues); breadth ~87 → ~86% (file formats counted), ready ~50–60% → ~55%, hours re-estimated to include plugins, AI, localization and `.prproj`; stage alpha |
 | 2026-10-05 | major | Honest assessment added in ROADMAP.md (checklist ~87% vs ready ~50–60%) |
 | 2026-10-02 | minor | Scorecard ~62% → ~72% → ~87% as the menu long tail, effects and codecs landed |
+
+Expanded macOS codec hardware support and M5 validation: [VideoToolbox formats](macos-videotoolbox.md). Remaining hardware estimates above have not been recalibrated.
