@@ -260,6 +260,7 @@ impl VideoDecoder for HybridDecoder {
         }
     }
 
+    /// Whether the stream consists entirely of independently decodable intra pictures.
     fn intra_only(&self) -> bool {
         matches!(self.info, StreamInfo::Intra)
     }

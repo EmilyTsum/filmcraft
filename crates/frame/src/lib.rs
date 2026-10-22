@@ -1144,6 +1144,7 @@ mod tests {
         ]
     }
 
+    /// Check that biplanar 8/10-bit conversion matches equivalent planar luma and chroma values.
     #[test]
     fn biplanar_matches_planar_conversion() {
         for (_, f) in sample_frames() {

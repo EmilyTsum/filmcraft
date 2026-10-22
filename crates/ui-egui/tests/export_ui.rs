@@ -511,6 +511,7 @@ fn sample_size_lists_every_size_and_greys_out_what_the_format_cannot_store() {
     d.snapshot("export-sample-size-prores");
 }
 
+/// Drive the macOS export widgets and verify HEVC profile and ProRes hardware settings follow the selected options.
 #[test]
 #[cfg(target_os = "macos")]
 fn macos_hevc_profile_and_prores_hardware_controls_are_operable() {

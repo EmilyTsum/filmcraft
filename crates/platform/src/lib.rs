@@ -6,11 +6,11 @@
 //! (`avcC`) and HEVC (`hvcC`) streams, 8- and 10-bit, 4:2:0 and 4:2:2, VP9 (`vpcC`, profile 0
 //! and 2, on Macs with a VP9 decoder) and AV1 (`av1C`, main profile 8- and 10-bit, on Macs with an
 //! AV1 decoder: the M3 and later); Media Foundation / DXVA on
-//! Windows; NVDEC ([`nvdec`], NVIDIA's driver) and VA-API ([`vaapi`]) on Linux for H.264 and HEVC; on other systems (and on
+//! Windows; NVDEC (`nvdec`, NVIDIA's driver) and VA-API ([`vaapi`]) on Linux for H.264 and HEVC; on other systems (and on
 //! Linux with neither) registration does nothing and reports [`Availability::Unavailable`]. It also registers a
 //! hardware H.264 encoder factory (`filmcraft_export::register_encoder`) that only acts when an
 //! export asks for it (`ExportSettings::hardware_encoding` = `Auto`), see [`hardware_encode`]; on
-//! macOS and on Windows (NVENC, [`nvenc`]) it also makes the H.265 export format available, and on Windows
+//! macOS and on Windows (NVENC, `nvenc`) it also makes the H.265 export format available, and on Windows
 //! (Main 10) lets HDR sequences export as HDR H.265.
 //!
 //! Hardware decoding never makes a file undecodable:

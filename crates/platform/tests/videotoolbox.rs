@@ -250,6 +250,7 @@ fn vp9_fixture(ff: &std::path::Path, profile: u8, size: &str) -> Option<std::pat
     fixture(ff, &name, &args)
 }
 
+/// Compare every native VP9 output plane and metadata field with the software decoder across sizes and bit depths.
 #[test]
 fn vp9_is_bit_exact_with_the_software_decoder() {
     let ff = filmcraft_testkit::require_ffmpeg!();
@@ -293,6 +294,7 @@ fn vp9_container_range_differing_from_the_bitstream_is_bit_exact() {
     assert_eq!(hw.name(), "VideoToolbox VP9");
 }
 
+/// Exercise VP9 replay and damaged-sample containment after a forced native failure.
 #[test]
 fn vp9_mid_stream_failure_and_damage_fall_back_to_software() {
     let ff = filmcraft_testkit::require_ffmpeg!();
@@ -361,6 +363,7 @@ fn av1_fixture(ff: &std::path::Path, bits: u32, size: &str) -> Option<std::path:
     fixture(ff, &name, &args)
 }
 
+/// Compare native AV1 frames with software decoding across supported sizes and bit depths.
 #[test]
 fn av1_is_bit_exact_with_the_software_decoder() {
     let ff = filmcraft_testkit::require_ffmpeg!();
@@ -443,6 +446,7 @@ fn av1_key_frame_without_a_sequence_header_decodes_from_av1c() {
     assert_same("av1 without in-band sequence headers, from the second key frame", &decode_all(hw.as_mut(), &s.samples[k..]), &reference[k..]);
 }
 
+/// Exercise AV1 software replay and malformed-input containment after native failure.
 #[test]
 fn av1_mid_stream_failure_and_damage_fall_back_to_software() {
     let ff = filmcraft_testkit::require_ffmpeg!();
@@ -509,6 +513,7 @@ fn av1_mid_stream_failure_and_damage_fall_back_to_software() {
     }
 }
 
+/// Verify native Metal import avoids CPU uploads and matches the CPU conversion output.
 #[test]
 fn zero_copy_metal_surface_imports_without_cpu_upload() {
     let ff = filmcraft_testkit::require_ffmpeg!();

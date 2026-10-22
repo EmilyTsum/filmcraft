@@ -89,6 +89,7 @@ impl VtProfile {
 }
 
 impl VtProfile {
+    /// Choose the CoreVideo input layout required by the profile, including packed AYUV16 for ProRes 4444/XQ.
     pub fn pixel_format(self) -> u32 {
         match self {
             Self::HevcMain10 => u32::from_be_bytes(*b"x420"),
@@ -99,6 +100,7 @@ impl VtProfile {
         }
     }
 
+    /// Whether the encoder accepts the 10-bit plane/conversion path rather than 8-bit NV12 input.
     pub fn ten_bit(self) -> bool {
         matches!(self, Self::HevcMain10 | Self::HevcMain42210 | Self::ProRes(_))
     }
@@ -113,6 +115,7 @@ pub struct VtOptions {
 }
 
 impl Default for VtOptions {
+    /// Use SDR color, no alpha, and quality 90 for callers that do not supply additional options.
     fn default() -> Self {
         Self { signal: Default::default(), alpha: false, quality: 90 }
     }
@@ -581,6 +584,7 @@ impl VtEncoder {
         Self::with_options(config, VtOptions::default())
     }
 
+    /// Validate dimensions, profile, color and alpha options before creating and configuring the native encoder.
     pub fn with_options(config: VtConfig, options: VtOptions) -> Result<VtEncoder, String> {
         let (w, h) = (config.width, config.height);
         if w == 0 || h == 0 || w > MAX_SIDE || h > MAX_SIDE {
@@ -680,6 +684,7 @@ impl VtEncoder {
         Ok(encoder)
     }
 
+    /// Apply codec-specific quality or profile/GOP/bitrate properties, then configure the requested color signal.
     fn configure(session: &VTCompressionSession, c: &VtConfig, options: VtOptions) -> Result<(), String> {
         if matches!(c.profile.codec(), VtCodec::ProRes | VtCodec::Jpeg) {
             // SAFETY: reading immutable framework constants. Intra codecs do not have H.26x
@@ -901,6 +906,7 @@ impl VtEncoder {
         self.submit(index, &buffer)
     }
 
+    /// Submit one retained input picture with checked timing and collect completed callback packets.
     fn submit(&mut self, index: u64, buffer: &CVImageBuffer) -> Result<Vec<VtPacket>, String> {
         let value = i64::try_from(index).ok().and_then(|i| i.checked_mul(i64::from(self.config.frame_duration))).ok_or("frame index out of range")?;
         let (pts, duration) = (cm_time(value, self.config.timescale), cm_time(i64::from(self.config.frame_duration), self.config.timescale));
@@ -967,6 +973,7 @@ fn configure_color(session: &VTCompressionSession, signal: filmcraft_export::Col
     Ok(())
 }
 
+/// Validate and pack 10-bit planes and optional alpha into P010, P210 or AYUV16 CoreVideo storage.
 #[allow(clippy::too_many_arguments)]
 fn fill10(pb: &CVImageBuffer, config: &VtConfig, pixel_format: u32, y: &[u16], u: &[u16], v: &[u16], alpha: Option<&[u16]>) -> Result<(), String> {
     let (w, h) = (config.width as usize, config.height as usize);

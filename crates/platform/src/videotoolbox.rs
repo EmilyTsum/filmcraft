@@ -108,6 +108,7 @@ unsafe impl Send for VtSurface {}
 unsafe impl Sync for VtSurface {}
 
 impl std::fmt::Debug for VtSurface {
+    /// Describe the retained surface dimensions and bit depth without reading its pixels.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VtSurface").field("w", &self.w).field("h", &self.h).field("bits", &self.layout.bits).finish()
     }
@@ -126,6 +127,7 @@ impl VtSurface {
         Ok(())
     }
 
+    /// Copy and cache 8-bit biplanar pixels; retain the native buffer if copying fails.
     fn read_planes_u8(&self) -> std::result::Result<[Arc<Vec<u8>>; 2], String> {
         let mut cache = self.u8_planes.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(planes) = cache.as_ref() {
@@ -138,6 +140,7 @@ impl VtSurface {
         Ok(planes)
     }
 
+    /// Copy and cache high-aligned 16-bit biplanar storage without discarding a failed source.
     fn read_planes_u16(&self) -> std::result::Result<[Arc<Vec<u16>>; 2], String> {
         let mut cache = self.u16_planes.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(planes) = cache.as_ref() {
@@ -152,6 +155,7 @@ impl VtSurface {
 }
 
 impl NativeSurface for VtSurface {
+    /// Resolve 8-bit CPU planes, logging a readback failure before returning the legacy absent-data result.
     fn planes_u8(&self) -> Option<[Arc<Vec<u8>>; 2]> {
         if self.layout.bits > 8 {
             return None;
@@ -159,6 +163,7 @@ impl NativeSurface for VtSurface {
         self.read_planes_u8().inspect_err(|e| log::error!("VideoToolbox {}x{} 8-bit CPU plane readback failed: {e}", self.w, self.h)).ok()
     }
 
+    /// Resolve 16-bit CPU planes, logging a readback failure before returning the legacy absent-data result.
     fn planes_u16(&self) -> Option<[Arc<Vec<u16>>; 2]> {
         if self.layout.bits <= 8 {
             return None;
@@ -166,11 +171,13 @@ impl NativeSurface for VtSurface {
         self.read_planes_u16().inspect_err(|e| log::error!("VideoToolbox {}x{} {}-bit CPU plane readback failed: {e}", self.w, self.h, self.layout.bits)).ok()
     }
 
+    /// Take cached 8-bit planes for recycling and drop this surface's native buffer reference.
     fn take_planes_u8(&self) -> Option<[Arc<Vec<u8>>; 2]> {
         *self.pb.lock().unwrap_or_else(PoisonError::into_inner) = None;
         self.u8_planes.lock().unwrap_or_else(PoisonError::into_inner).take()
     }
 
+    /// Take cached 16-bit planes for recycling and drop this surface's native buffer reference.
     fn take_planes_u16(&self) -> Option<[Arc<Vec<u16>>; 2]> {
         *self.pb.lock().unwrap_or_else(PoisonError::into_inner) = None;
         self.u16_planes.lock().unwrap_or_else(PoisonError::into_inner).take()
@@ -188,7 +195,7 @@ unsafe impl Send for MetalCache {}
 
 static METAL_CACHE: Mutex<Option<MetalCache>> = Mutex::new(None);
 
-/// Import a [`VtSurface`]'s `IOSurface`-backed `CVImageBuffer` directly into [`wgpu::TextureView`]s
+/// Import a `VtSurface`'s `IOSurface`-backed `CVImageBuffer` directly into [`wgpu::TextureView`]s
 /// for plane 0 (`R8Unorm` / `R16Unorm`) and plane 1 (`Rg8Unorm` / `Rg16Unorm`) without copying
 /// texel data through CPU memory.
 pub fn import_metal_surface(device: &wgpu::Device, surface: &dyn NativeSurface, w: u32, h: u32, chroma: Chroma, bits: u32) -> Option<[wgpu::TextureView; 2]> {
@@ -240,6 +247,7 @@ unsafe impl Send for RetainedPlaneHolders {}
 // mutation occurs across threads.
 unsafe impl Sync for RetainedPlaneHolders {}
 
+/// Wrap one CoreVideo plane as a Metal view, retaining its native owners until the GPU texture is dropped.
 #[allow(clippy::too_many_arguments)]
 fn import_plane(
     device: &wgpu::Device,
@@ -307,6 +315,7 @@ impl Shared {
         self.out.lock().unwrap_or_else(PoisonError::into_inner).push(o);
     }
 
+    /// Bound decoder-owned native buffers by copying the oldest live surface before removing its tracking entry.
     fn track_surface(&self, surface: &Arc<VtSurface>) -> std::result::Result<(), String> {
         let mut q = self.surfaces.lock().unwrap_or_else(PoisonError::into_inner);
         q.retain(|w| w.strong_count() > 0);
@@ -424,6 +433,7 @@ fn plane<'l>(pb: &CVImageBuffer, _lock: &'l Locked<'_>, i: usize) -> std::result
     Ok(PlaneView { data, stride, width, height })
 }
 
+/// Lock, validate and copy cropped NV12/NV16 luma and interleaved chroma into pooled CPU planes.
 fn copy_biplanar_u8(pb: &CVImageBuffer, l: &Layout, ox: usize, oy: usize, w: usize, h: usize) -> std::result::Result<[Arc<Vec<u8>>; 2], String> {
     // SAFETY: `pb` is a valid pixel buffer for the duration of this call; `Locked` unlocks it on drop.
     if unsafe { CVPixelBufferLockBaseAddress(pb, CVPixelBufferLockFlags::ReadOnly) } != 0 {
@@ -457,6 +467,7 @@ fn copy_biplanar_u8(pb: &CVImageBuffer, l: &Layout, ox: usize, oy: usize, w: usi
     Ok([Arc::new(yp), Arc::new(uvp)])
 }
 
+/// Lock, validate and copy cropped P010/P210 planes while preserving their high-aligned sample codes.
 fn copy_biplanar_u16(pb: &CVImageBuffer, l: &Layout, ox: usize, oy: usize, w: usize, h: usize) -> std::result::Result<[Arc<Vec<u16>>; 2], String> {
     // SAFETY: `pb` is a valid pixel buffer for the duration of this call; `Locked` unlocks it on drop.
     if unsafe { CVPixelBufferLockBaseAddress(pb, CVPixelBufferLockFlags::ReadOnly) } != 0 {
@@ -645,6 +656,7 @@ enum Stream {
 }
 
 impl Stream {
+    /// Build the CoreMedia description from parameter sets, a codec configuration atom or an intra sample entry.
     fn format_description(&self) -> std::result::Result<CFRetained<CMFormatDescription>, String> {
         match self {
             Self::Nal(info) => format_description(info),
@@ -664,6 +676,7 @@ impl Stream {
 }
 
 impl Session {
+    /// Create a hardware-required decompression session and its synchronized callback state for the requested layout.
     fn new(stream: &Stream, layout: Layout) -> std::result::Result<Session, String> {
         filmcraft_gpu::register_surface_importer(import_metal_surface);
         let format = stream.format_description()?;
@@ -936,6 +949,7 @@ impl VtDecoder {
         Self::with(Stream::Av1(info, config.to_bytes()), 0, layout, "VideoToolbox AV1")
     }
 
+    /// Create the initial session eagerly so unsupported stream/layout combinations fail before decoding starts.
     fn with(stream: Stream, reorder: usize, layout: Layout, name: &'static str) -> std::result::Result<Self, String> {
         // Create the session now so unsupported streams are declined up front.
         let session = Session::new(&stream, layout.clone())?;
@@ -1144,6 +1158,7 @@ impl VideoDecoder for VtDecoder {
         self.name
     }
 
+    /// Report whether every compressed sample can be decoded without earlier reference pictures.
     fn intra_only(&self) -> bool {
         matches!(self.stream, Stream::Intra(_))
     }
@@ -1168,6 +1183,7 @@ impl VideoDecoder for VtDecoder {
 const AYUV16: u32 = u32::from_be_bytes(*b"y416");
 const BGRA: u32 = u32::from_be_bytes(*b"BGRA");
 
+/// Validate a ProRes/JPEG sample entry and select biplanar or packed storage appropriate to its profile.
 fn intra_layout(entry: &filmcraft_isobmff::SampleEntry) -> std::result::Result<Layout, String> {
     let v = entry.video.as_ref().ok_or("no video dimensions")?;
     let (w, h) = (u32::from(v.width), u32::from(v.height));
@@ -1195,6 +1211,7 @@ fn intra_layout(entry: &filmcraft_isobmff::SampleEntry) -> std::result::Result<L
     })
 }
 
+/// Create a CoreMedia video description for the intra codec and its sample-entry dimensions.
 fn intra_format_description(entry: &filmcraft_isobmff::SampleEntry) -> std::result::Result<CFRetained<CMFormatDescription>, String> {
     let v = entry.video.as_ref().ok_or("no video dimensions")?;
     let mut out: *const CMFormatDescription = std::ptr::null();
@@ -1207,6 +1224,7 @@ fn intra_format_description(entry: &filmcraft_isobmff::SampleEntry) -> std::resu
     Ok(unsafe { CFRetained::from_raw(raw) })
 }
 
+/// Copy packed BGRA or AYUV16 output into CPU pixels, preserving alpha and the declared color metadata.
 fn copy_packed(pb: &CVImageBuffer, l: &Layout) -> std::result::Result<VideoFrame, String> {
     let (cx, cy, w, h) = l.crop;
     let (bw, bh) = (CVPixelBufferGetWidth(pb), CVPixelBufferGetHeight(pb));

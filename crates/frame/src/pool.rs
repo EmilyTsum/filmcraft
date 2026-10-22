@@ -161,7 +161,7 @@ pub fn recycle(frame: Arc<VideoFrame>) {
     }
 }
 
-/// Free the idle float images. A standalone export leaves that shelf full (up to [`F32_MAX_BYTES`]
+/// Free the idle float images. A standalone export leaves that shelf full (up to `F32_MAX_BYTES`
 /// of images, each the size of that export's frames) and nothing else asks for those sizes again,
 /// so they would sit idle until the next export. Images still in use are not touched. The 8- and
 /// 16-bit plane shelves are left alone: playback recycles decoded frames through them all the time.

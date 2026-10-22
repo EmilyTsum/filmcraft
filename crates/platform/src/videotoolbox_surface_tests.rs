@@ -1,5 +1,6 @@
 use super::*;
 
+/// Describe the fixed 4x4 NV12/P010 picture used by the retention regression tests.
 fn test_layout(bits: u32) -> Layout {
     Layout {
         pixel_format: if bits == 8 { NV12_VIDEO } else { P010_VIDEO },
@@ -13,6 +14,7 @@ fn test_layout(bits: u32) -> Layout {
     }
 }
 
+/// Allocate and initialize a real CoreVideo buffer with deterministic luma and chroma values.
 fn buffer(bits: u32) -> CFRetained<CVImageBuffer> {
     let mut raw = std::ptr::null_mut();
     // SAFETY: fixed valid dimensions/format and a valid output pointer; no borrowed storage.
@@ -34,6 +36,7 @@ fn buffer(bits: u32) -> CFRetained<CVImageBuffer> {
     pb
 }
 
+/// Wrap a test buffer with a selectable view width so oversized views can force copy validation errors.
 fn surface(bits: u32, w: usize) -> VtSurface {
     VtSurface {
         pb: Mutex::new(Some(buffer(bits))),
@@ -47,10 +50,12 @@ fn surface(bits: u32, w: usize) -> VtSurface {
     }
 }
 
+/// Create empty decoder callback and retention queues for the requested test bit depth.
 fn shared(bits: u32) -> Shared {
     Shared { layout: Mutex::new(test_layout(bits)), out: Mutex::new(Vec::new()), surfaces: Mutex::new(VecDeque::new()) }
 }
 
+/// A failed CPU copy must preserve the same buffer for repeated failures and eventual recovery.
 #[test]
 fn failed_surface_eviction_preserves_the_buffer_for_repeated_reads_and_recovery() {
     for bits in [8, 10] {
@@ -84,6 +89,7 @@ fn failed_surface_eviction_preserves_the_buffer_for_repeated_reads_and_recovery(
     }
 }
 
+/// Failed eviction must reject the new output while keeping the oldest buffer and queue entry.
 #[test]
 fn failed_surface_eviction_rejects_new_frames_without_losing_tracking() {
     for bits in [8, 10] {
@@ -105,6 +111,7 @@ fn failed_surface_eviction_rejects_new_frames_without_losing_tracking() {
     }
 }
 
+/// Successful eviction must bound native ownership without changing the retained CPU pixel values.
 #[test]
 fn successful_surface_eviction_keeps_the_retention_limit_and_original_pixels() {
     for bits in [8, 10] {

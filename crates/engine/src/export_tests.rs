@@ -848,6 +848,7 @@ fn caption_sidecars_keep_only_the_exported_interval() {
     }
 }
 
+/// Verify command settings retain explicit HEVC profiles and reject invalid profile names.
 #[test]
 fn hevc_profiles_round_trip_through_command_settings() {
     let s = demo();

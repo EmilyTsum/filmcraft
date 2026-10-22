@@ -428,6 +428,7 @@ pub fn hevc_has_alpha(config: &filmcraft_isobmff::HevcConfig) -> bool {
 mod tests {
     use super::*;
 
+    /// Reject truncated/cancelled HEVC alpha metadata while recognizing a complete active alpha declaration.
     #[test]
     fn hevc_alpha_sei_rejects_truncations_and_cancelled_messages() {
         let has = |payload: &[u8]| {

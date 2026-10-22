@@ -38,6 +38,7 @@ pub struct Plan {
 
 impl TryFrom<StreamInfo> for Stream {
     type Error = String;
+    /// Validate the shared stream description against the formats accepted by the Media Foundation adapter.
     fn try_from(i: StreamInfo) -> Result<Self, String> {
         match i {
             StreamInfo::Nal(n) => Ok(Self::Nal(n)),

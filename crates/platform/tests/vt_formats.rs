@@ -7,14 +7,18 @@ use filmcraft_time::FrameRate;
 
 struct TestLogger;
 impl log::Log for TestLogger {
+    /// Capture all native profile diagnostics emitted during these integration tests.
     fn enabled(&self, _: &log::Metadata) -> bool {
         true
     }
+    /// Print a native diagnostic so a failing profile case retains its underlying cause.
     fn log(&self, r: &log::Record) {
         eprintln!("{}", r.args());
     }
+    /// No buffering is used by this stderr-backed test logger.
     fn flush(&self) {}
 }
+/// Exercise supported profiles, SDR/HDR signals and alpha combinations through native encode/decode and external oracles.
 #[test]
 fn profile_round_trips() {
     let _ = log::set_logger(&TestLogger);
@@ -276,6 +280,7 @@ fn local_prores_decode_and_seek() {
     eprintln!("LOCAL hardware-only decoding (including sample copies and CPU readback): {:.1} fps", count as f64 / start.elapsed().as_secs_f64());
 }
 
+/// Mux native packets and verify independent decoding, frame counts, profile and color metadata with FFmpeg/ffprobe.
 #[allow(clippy::too_many_arguments)]
 fn independent_oracle(
     format: Format,
@@ -345,6 +350,7 @@ fn independent_oracle(
     );
 }
 
+/// Check ProRes software recovery after native failure and reject truncated samples and malformed encoder inputs.
 #[test]
 fn prores_midstream_failure_and_hostile_frames() {
     use filmcraft_codecs::{VideoDecoder, hw::StreamInfo};
@@ -378,6 +384,7 @@ fn prores_midstream_failure_and_hostile_frames() {
     }
 }
 
+/// Reject invalid or incompatible explicit profiles instead of silently selecting a weaker format.
 #[test]
 fn explicit_profiles_are_validated_and_never_downgraded() {
     use filmcraft_platform::{
@@ -404,6 +411,7 @@ fn explicit_profiles_are_validated_and_never_downgraded() {
     assert!(VtEncoder::new(config).is_err());
 }
 
+/// Verify that the product export pipeline preserves selected profiles, HDR metadata and supported transparency.
 #[test]
 fn full_export_preserves_profiles_hdr_and_transparency() {
     use filmcraft_color::{ColorPipeline, WorkingSpace};
